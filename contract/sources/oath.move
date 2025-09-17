@@ -46,7 +46,7 @@ module OathDefi::oath {
 
 	/// 初始化表（仅合约部署时调用一次）
 	public entry fun init(owner: &signer) {
-		assert!(signer::address_of(owner) == @0x1, 100); // 仅合约部署者可初始化
+		assert!(signer::address_of(owner) == @OathDefi, 100); // 仅合约部署者可初始化
 		move_to(owner, OathTable { table: table::new<u64, Oath>(), next_id: 1 });
 		move_to(owner, SBTTable { table: table::new<u64, SBT>(), next_id: 1 });
 	}
@@ -103,6 +103,7 @@ module OathDefi::oath {
 	}
 
 	/// 查询 Oath
+	#[view]
 	public fun get_oath(owner: address, oath_id: u64): Option<Oath> acquires OathTable {
 		let table_ref = borrow_global<OathTable>(owner);
 		if (table::contains(&table_ref.table, oath_id)) {
@@ -115,6 +116,7 @@ module OathDefi::oath {
 	}
 
 	/// 查询 SBT
+	#[view]
 	public fun get_sbt(owner: address, sbt_id: u64): Option<SBT> acquires SBTTable {
 		let sbt_table = borrow_global<SBTTable>(owner);
 		if (table::contains(&sbt_table.table, sbt_id)) {
