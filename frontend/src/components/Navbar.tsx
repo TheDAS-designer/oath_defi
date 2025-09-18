@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Shield, Wallet, Menu, X } from 'lucide-react';
+import { Shield, Wallet, Menu, X, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 
@@ -15,7 +15,11 @@ const Navbar: React.FC = () => {
     { name: 'Home', href: '/' },
     { name: 'Explore Oaths', href: '/oaths' },
     { name: 'Vaults', href: '/vaults' },
+  ];
+
+  const createItems = [
     { name: 'Create Oath', href: '/create' },
+    { name: 'Create Vault', href: '/vaults/create' },
   ];
 
   const isActive = (href: string) => {
@@ -50,6 +54,26 @@ const Navbar: React.FC = () => {
                 {item.name}
               </Link>
             ))}
+            
+            {/* Create Dropdown */}
+            <div className="relative group">
+              <button className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors flex items-center space-x-1">
+                <span>Create</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+              
+              <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                {createItems.map((item) => (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-primary-600 first:rounded-t-lg last:rounded-b-lg"
+                  >
+                    {item.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Wallet Connection */}
@@ -114,6 +138,20 @@ const Navbar: React.FC = () => {
                   {item.name}
                 </Link>
               ))}
+              
+              {/* Create Items in Mobile */}
+              <div className="border-t border-gray-200 pt-2 mt-2">
+                {createItems.map((item) => (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    onClick={() => setIsMenuOpen(false)}
+                    className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
+                  >
+                    {item.name}
+                  </Link>
+                ))}
+              </div>
             </div>
           </div>
         )}

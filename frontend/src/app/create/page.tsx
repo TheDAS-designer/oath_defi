@@ -133,6 +133,17 @@ export default function CreateOathPage() {
         return selectedTemplate.parameters.every(param => {
           if (!param.required) return true;
           const value = form.parameters[param.key];
+          
+          // Special handling for vaultAddress - use form.vaultAddress if not in parameters
+          if (param.key === 'vaultAddress') {
+            return (value && value !== '') || (form.vaultAddress && form.vaultAddress !== '');
+          }
+          
+          // Special handling for duration - use form.duration if not in parameters
+          if (param.key === 'duration') {
+            return (value && value !== 0) || (form.duration && form.duration > 0);
+          }
+          
           return value !== undefined && value !== '' && value !== 0;
         });
       case CreateStep.SET_COLLATERAL:
@@ -269,6 +280,14 @@ export default function CreateOathPage() {
                 Choose Oath Template
               </h2>
               
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h3 className="text-sm font-medium text-blue-800 mb-2">Template Categories:</h3>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li><strong>Performance/Growth/Risk Control:</strong> Commitments related to MetaMorpho Vaults</li>
+                  <li><strong>Trust Building:</strong> Independent commitments (like token locks) to establish credibility</li>
+                </ul>
+              </div>
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {mockOathTemplates.map((template) => (
                   <div
@@ -302,71 +321,105 @@ export default function CreateOathPage() {
                 Configure {selectedTemplate.name}
               </h2>
               
+              {selectedTemplate.id === 'token-lock' && (
+                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <h3 className="text-sm font-medium text-yellow-800 mb-2">Token Lock Commitment:</h3>
+                  <p className="text-sm text-yellow-700">
+                    This commitment locks your project tokens for a specified period to build trust with investors. 
+                    This is independent of any vault and demonstrates long-term commitment to your project.
+                  </p>
+                </div>
+              )}
+              
               <div className="space-y-6">
-                {selectedTemplate.parameters.map((param) => (
-                  <div key={param.key}>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {param.label}
-                      {param.required && <span className="text-red-500 ml-1">*</span>}
-                    </label>
-                    
-                    {param.type === 'number' ? (
-                      <input
-                        type="number"
-                        value={form.parameters[param.key] || ''}
-                        onChange={(e) => updateParameter(param.key, parseFloat(e.target.value) || 0)}
-                        placeholder={param.placeholder}
-                        min={param.min}
-                        max={param.max}
-                        className="input"
-                        required={param.required}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={form.parameters[param.key] || ''}
-                        onChange={(e) => updateParameter(param.key, e.target.value)}
-                        placeholder={param.placeholder}
-                        className="input"
-                        required={param.required}
-                      />
-                    )}
-                  </div>
-                ))}
                 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Duration (days) *
-                  </label>
-                  <input
-                    type="number"
-                    value={form.duration}
-                    onChange={(e) => updateForm({ duration: parseInt(e.target.value) || 30 })}
-                    min="7"
-                    max="365"
-                    className="input"
-                    required
-                  />
-                </div>
-
-                {/* Vault Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Vault {selectedTemplate.parameters.some(p => p.key === 'vaultAddress') && '*'}
-                  </label>
-                  <select
-                    value={form.vaultAddress}
-                    onChange={(e) => updateForm({ vaultAddress: e.target.value })}
-                    className="input"
-                  >
-                    <option value="">Choose a vault...</option>
-                    {mockMetaMorphoVaults.map((vault) => (
-                      <option key={vault.address} value={vault.address}>
-                        {vault.name} ({formatPercentage(vault.currentAPY)} APY)
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Dynamic form fields based on template parameters */}
+                {selectedTemplate.parameters.map((param) => {
+                  // Handle special cases for different parameter types
+                  if (param.key === 'vaultAddress') {
+                    return (
+                      <div key={param.key}>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {param.label}
+                          {param.required && <span className="text-red-500 ml-1">*</span>}
+                        </label>
+                        <select
+                          value={form.parameters[param.key] || form.vaultAddress}
+                          onChange={(e) => {
+                            updateParameter(param.key, e.target.value);
+                            updateForm({ vaultAddress: e.target.value });
+                          }}
+                          className="input"
+                          required={param.required}
+                        >
+                          <option value="">Choose a vault...</option>
+                          {mockMetaMorphoVaults.map((vault) => (
+                            <option key={vault.address} value={vault.address}>
+                              {vault.name} ({formatPercentage(vault.currentAPY)} APY)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+                  
+                  if (param.key === 'duration') {
+                    return (
+                      <div key={param.key}>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {param.label}
+                          {param.required && <span className="text-red-500 ml-1">*</span>}
+                        </label>
+                        <input
+                          type="number"
+                          value={form.parameters[param.key] || form.duration}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value) || (param.min || 7);
+                            updateParameter(param.key, value);
+                            updateForm({ duration: value });
+                          }}
+                          placeholder={param.placeholder}
+                          min={param.min}
+                          max={param.max}
+                          className="input"
+                          required={param.required}
+                        />
+                      </div>
+                    );
+                  }
+                  
+                  // Handle other parameter types normally
+                  return (
+                    <div key={param.key}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {param.label}
+                        {param.required && <span className="text-red-500 ml-1">*</span>}
+                      </label>
+                      
+                      {param.type === 'number' ? (
+                        <input
+                          type="number"
+                          value={form.parameters[param.key] || ''}
+                          onChange={(e) => updateParameter(param.key, parseFloat(e.target.value) || 0)}
+                          placeholder={param.placeholder}
+                          min={param.min}
+                          max={param.max}
+                          className="input"
+                          required={param.required}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={form.parameters[param.key] || ''}
+                          onChange={(e) => updateParameter(param.key, e.target.value)}
+                          placeholder={param.placeholder}
+                          className="input"
+                          required={param.required}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -477,32 +530,32 @@ export default function CreateOathPage() {
                     <span className="font-medium">{selectedTemplate.name}</span>
                   </div>
                   
-                  {Object.entries(form.parameters).map(([key, value]) => {
-                    const param = selectedTemplate.parameters.find(p => p.key === key);
+                  {selectedTemplate.parameters.map((param) => {
+                    let value = form.parameters[param.key];
+                    
+                    // Handle special cases
+                    if (param.key === 'vaultAddress') {
+                      value = value || form.vaultAddress;
+                    } else if (param.key === 'duration') {
+                      value = value || form.duration;
+                    }
+                    
+                    if (!value && !param.required) return null;
+                    
                     return (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-gray-600">{param?.label}:</span>
+                      <div key={param.key} className="flex justify-between">
+                        <span className="text-gray-600">{param.label}:</span>
                         <span className="font-medium">
-                          {param?.type === 'number' && param.key.includes('APY') 
+                          {param.type === 'number' && param.key.includes('APY') 
                             ? formatPercentage(value as number)
+                            : param.key === 'vaultAddress' && selectedVault
+                            ? selectedVault.name
                             : value?.toString()
                           }
                         </span>
                       </div>
                     );
                   })}
-                  
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Duration:</span>
-                    <span className="font-medium">{form.duration} days</span>
-                  </div>
-                  
-                  {selectedVault && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Vault:</span>
-                      <span className="font-medium">{selectedVault.name}</span>
-                    </div>
-                  )}
                   
                   <div className="flex justify-between border-t pt-3">
                     <span className="text-gray-600">Total Collateral:</span>

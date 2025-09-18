@@ -233,13 +233,14 @@ export const mockOathTemplates: OathTemplate[] = [
     parameters: [
       { key: 'maxDrawdown', label: 'Max Drawdown (%)', type: 'number', required: true, min: 1, max: 20 },
       { key: 'minAPY', label: 'Minimum APY (%)', type: 'number', required: true, min: 1, max: 30 },
-      { key: 'duration', label: 'Duration (days)', type: 'number', required: true, min: 30, max: 180 }
+      { key: 'duration', label: 'Duration (days)', type: 'number', required: true, min: 30, max: 180 },
+      { key: 'vaultAddress', label: 'Vault Address', type: 'string', required: true }
     ]
   },
   {
     id: 'token-lock',
     name: 'Token Lock Commitment',
-    description: 'Lock team tokens for a specified period to build trust',
+    description: 'Lock team tokens for a specified period to build trust (independent of any vault)',
     category: 'Trust Building',
     minimumCollateral: 100000,
     parameters: [

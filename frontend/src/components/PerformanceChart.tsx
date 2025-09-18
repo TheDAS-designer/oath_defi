@@ -12,16 +12,20 @@ interface PerformanceData {
 interface PerformanceChartProps {
   data: PerformanceData[];
   targetAPY?: number;
-  title: string;
-  metric: 'apy' | 'tvl';
+  title?: string;
+  metric?: 'apy' | 'tvl';
+  showTVL?: boolean; // 兼容旧的接口
 }
 
 const PerformanceChart: React.FC<PerformanceChartProps> = ({ 
   data, 
   targetAPY, 
-  title, 
-  metric 
+  title = 'Performance History', 
+  metric,
+  showTVL = false
 }) => {
+  // 确定实际使用的 metric，兼容旧接口
+  const actualMetric = metric || (showTVL ? 'tvl' : 'apy');
   if (!data || data.length === 0) {
     return (
       <div className="card">
@@ -34,20 +38,20 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
   }
 
   const formatTooltipValue = (value: number) => {
-    if (metric === 'apy') {
+    if (actualMetric === 'apy') {
       return formatPercentage(value);
     }
     return `$${value.toLocaleString()}`;
   };
 
   const formatYAxisValue = (value: number) => {
-    if (metric === 'apy') {
+    if (actualMetric === 'apy') {
       return `${value}%`;
     }
     return value >= 1000000 ? `$${(value / 1000000).toFixed(1)}M` : `$${(value / 1000).toFixed(0)}K`;
   };
 
-  const currentValue = data[data.length - 1]?.[metric] || 0;
+  const currentValue = data[data.length - 1]?.[actualMetric] || 0;
   const isAboveTarget = targetAPY ? currentValue >= targetAPY : true;
 
   return (
@@ -88,7 +92,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             />
             <Tooltip
               labelFormatter={(timestamp) => formatDate(timestamp as number)}
-              formatter={(value: number) => [formatTooltipValue(value), metric.toUpperCase()]}
+              formatter={(value: number) => [formatTooltipValue(value), actualMetric.toUpperCase()]}
               contentStyle={{
                 backgroundColor: 'white',
                 border: '1px solid #e5e7eb',
@@ -109,10 +113,10 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             
             <Line
               type="monotone"
-              dataKey={metric}
-              stroke={metric === 'apy' && targetAPY && !isAboveTarget ? '#ef4444' : '#0ea5e9'}
+              dataKey={actualMetric}
+              stroke={actualMetric === 'apy' && targetAPY && !isAboveTarget ? '#ef4444' : '#0ea5e9'}
               strokeWidth={3}
-              dot={{ fill: metric === 'apy' && targetAPY && !isAboveTarget ? '#ef4444' : '#0ea5e9', strokeWidth: 0, r: 4 }}
+              dot={{ fill: actualMetric === 'apy' && targetAPY && !isAboveTarget ? '#ef4444' : '#0ea5e9', strokeWidth: 0, r: 4 }}
               activeDot={{ r: 6, stroke: '#0ea5e9', strokeWidth: 2 }}
             />
           </LineChart>
@@ -126,19 +130,19 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             <div>
               <div className="text-sm text-gray-500">Peak</div>
               <div className="font-semibold text-gray-900">
-                {formatTooltipValue(Math.max(...data.map(d => d[metric])))}
+                {formatTooltipValue(Math.max(...data.map(d => d[actualMetric])))}
               </div>
             </div>
             <div>
               <div className="text-sm text-gray-500">Low</div>
               <div className="font-semibold text-gray-900">
-                {formatTooltipValue(Math.min(...data.map(d => d[metric])))}
+                {formatTooltipValue(Math.min(...data.map(d => d[actualMetric])))}
               </div>
             </div>
             <div>
               <div className="text-sm text-gray-500">Average</div>
               <div className="font-semibold text-gray-900">
-                {formatTooltipValue(data.reduce((sum, d) => sum + d[metric], 0) / data.length)}
+                {formatTooltipValue(data.reduce((sum, d) => sum + d[actualMetric], 0) / data.length)}
               </div>
             </div>
           </div>
