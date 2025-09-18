@@ -1,10 +1,11 @@
 [package]
-name = "oath"
-version = "1.0.0"
+name = "oath_vault_v2"
+version = "2.0.0"
 authors = []
 
 [addresses]
 OathDefi = '0xa3228904a096599a799b74cb18ddd0eb0a78e49c07c119b80d597c804476b0e0'
+
 [dev-addresses]
 
 [dependencies.AptosFramework]
