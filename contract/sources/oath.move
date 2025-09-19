@@ -4,6 +4,7 @@ module OathDefi::oath_vault_v7 {
     use std::option::{Self, Option};
     use std::vector;
     use aptos_framework::timestamp;
+    use aptos_framework::event;
     use std::table::{Self, Table};
     
     // 导入类型定义
@@ -41,6 +42,73 @@ module OathDefi::oath_vault_v7 {
         next_id: u64,
     }
 
+    /// 全局 Oath 注册表（用于跟踪所有用户的 Oath）
+    struct GlobalOathRegistry has key {
+        oath_records: Table<u64, OathRecord>, // 全局 Oath 记录
+        next_global_id: u64,
+    }
+
+    /// Oath 记录结构（包含用户地址和用户本地 ID）
+    struct OathRecord has store, copy, drop {
+        owner: address,        // Oath 所有者地址
+        local_id: u64,        // 用户本地的 Oath ID
+        global_id: u64,       // 全局唯一 ID
+        created_at: u64,      // 创建时间
+    }
+
+    // ========== 事件结构体 ==========
+
+    /// Oath 创建事件
+    /// 当用户成功创建新的誓言时触发
+    #[event]
+    struct OathCreatedEvent has drop, store {
+        // 基本信息
+        id: u64,                                    // 誓言唯一标识符
+        creator: address,                           // 创建者地址
+        content: string::String,                    // 誓言内容描述
+        category: string::String,                   // 誓言分类
+        category_id: string::String,                // 誓言分类 ID
+        
+        // 时间信息
+        start_time: u64,                            // 誓言开始时间戳
+        end_time: u64,                              // 誓言结束时间戳
+        
+        // 抵押相关
+        stable_collateral: u64,                     // 稳定币抵押数量
+        collateral_tokens_count: u64,               // 抵押代币数量
+        is_over_collateralized: bool,               // 是否过度抵押
+        
+        // Vault 集成
+        has_vault_address: bool,                    // 是否关联 Vault
+        target_apy: Option<u64>,                    // 目标年化收益率（基点）
+        
+        // 状态
+        status: u8,                                 // 誓言状态
+        evidence: string::String,                   // 初始证据描述
+    }
+
+    /// Oath 状态更新事件
+    /// 当誓言状态发生变化时触发
+    #[event]
+    struct OathStatusUpdatedEvent has drop, store {
+        id: u64,                                    // 誓言 ID
+        creator: address,                           // 创建者地址
+        old_status: u8,                             // 原状态
+        new_status: u8,                             // 新状态
+        evidence: string::String,                   // 更新证据
+        timestamp: u64,                             // 更新时间戳
+    }
+
+    /// SBT 铸造事件
+    /// 当用户完成誓言并铸造 SBT 时触发
+    #[event]
+    struct SBTMintedEvent has drop, store {
+        sbt_id: u64,                                // SBT ID
+        owner: address,                             // SBT 持有者
+        oath_id: u64,                               // 对应的誓言 ID
+        mint_time: u64,                             // 铸造时间戳
+    }
+
     // ========== 初始化函数 ==========
 
     /// 初始化 Oath 表
@@ -73,6 +141,19 @@ module OathDefi::oath_vault_v7 {
         move_to(account, VaultTable {
             vaults: table::new<u64, Vault>(),
             next_id: 1,
+        });
+    }
+
+    /// 初始化全局 Oath 注册表（只能由模块发布者调用）
+    public entry fun initialize_global_oath_registry(account: &signer) {
+        let account_addr = signer::address_of(account);
+        // 只有合约部署者可以初始化全局注册表
+        assert!(account_addr == @OathDefi, ERROR_UNAUTHORIZED);
+        assert!(!exists<GlobalOathRegistry>(account_addr), ERROR_ALREADY_INITIALIZED);
+        
+        move_to(account, GlobalOathRegistry {
+            oath_records: table::new<u64, OathRecord>(),
+            next_global_id: 1,
         });
     }
 
@@ -141,6 +222,26 @@ module OathDefi::oath_vault_v7 {
         );
         
         table::add(&mut oath_table.oaths, id, oath);
+
+        // 触发 Oath 创建事件
+        let oath_created_event = OathCreatedEvent {
+            id,
+            creator: creator_addr,
+            content,
+            category,
+            category_id: categoryId,
+            start_time: timestamp::now_seconds(),
+            end_time: endTime,
+            stable_collateral: collateralAmount,
+            collateral_tokens_count: 0, // collateral_tokens_count - 当前为空数组
+            is_over_collateralized: false, // is_over_collateralized
+            has_vault_address: option::is_some(&vault_address_option), // has_vault_address
+            target_apy: target_apy_option,
+            status: types::get_status_active(),
+            evidence: description,
+        };
+        
+        event::emit(oath_created_event);
     }
 
     /// 确保 OathTable 存在，如果不存在则创建
@@ -170,7 +271,7 @@ module OathDefi::oath_vault_v7 {
         token_amounts: vector<u64>,                 // 代币数量列表
         token_addresses: vector<string::String>,    // 代币地址列表
         token_usd_values: vector<u64>,              // 代币USD价值列表
-    ) acquires OathTable {
+    ) acquires OathTable, GlobalOathRegistry {
         let creator_addr = signer::address_of(account);
         
         // 自动初始化 OathTable（如果不存在）
@@ -237,6 +338,50 @@ module OathDefi::oath_vault_v7 {
         );
         
         table::add(&mut oath_table.oaths, id, oath);
+
+        // 触发 Oath 创建事件
+        let oath_created_event = OathCreatedEvent {
+            id,
+            creator: creator_addr,
+            content,
+            category,
+            category_id: categoryId,
+            start_time: timestamp::now_seconds(),
+            end_time: endTime,
+            stable_collateral: collateralAmount,
+            collateral_tokens_count: vector::length(&collateral_tokens_vec), // collateral_tokens_count
+            is_over_collateralized: false, // is_over_collateralized
+            has_vault_address: option::is_some(&vault_address_option), // has_vault_address
+            target_apy: target_apy_option,
+            status: types::get_status_active(),
+            evidence: description,
+        };
+        
+        event::emit(oath_created_event);
+        
+        // 将 Oath 记录添加到全局注册表
+        add_oath_to_global_registry(creator_addr, id);
+    }
+
+    /// 将 Oath 添加到全局注册表
+    fun add_oath_to_global_registry(owner: address, local_id: u64) acquires GlobalOathRegistry {
+        // 确保全局注册表存在
+        if (!exists<GlobalOathRegistry>(@OathDefi)) {
+            return // 如果全局注册表不存在，跳过注册（可以考虑抛出错误）
+        };
+        
+        let registry = borrow_global_mut<GlobalOathRegistry>(@OathDefi);
+        let global_id = registry.next_global_id;
+        registry.next_global_id = global_id + 1;
+        
+        let record = OathRecord {
+            owner,
+            local_id,
+            global_id,
+            created_at: timestamp::now_seconds(),
+        };
+        
+        table::add(&mut registry.oath_records, global_id, record);
     }
 
     /// 为誓言添加抵押代币
@@ -273,8 +418,20 @@ module OathDefi::oath_vault_v7 {
         assert!(table::contains(&oath_table.oaths, oath_id), ERROR_OATH_NOT_FOUND);
         
         let oath = table::borrow_mut(&mut oath_table.oaths, oath_id);
+        let old_status = types::oath_get_status(oath);
         types::oath_set_status(oath, types::get_status_completed());
         types::oath_set_evidence(oath, evidence);
+
+        // 触发 Oath 状态更新事件
+        let status_updated_event = OathStatusUpdatedEvent {
+            id: oath_id,
+            creator: user_addr,
+            old_status,
+            new_status: types::get_status_completed(),
+            evidence,
+            timestamp: timestamp::now_seconds(),
+        };
+        event::emit(status_updated_event);
         
         // 创建 SBT
         assert!(exists<SBTTable>(user_addr), ERROR_NOT_INITIALIZED);
@@ -284,6 +441,15 @@ module OathDefi::oath_vault_v7 {
         
         let sbt = types::create_sbt(sbt_id, user_addr, oath_id, timestamp::now_seconds());
         table::add(&mut sbt_table.sbts, sbt_id, sbt);
+
+        // 触发 SBT 铸造事件
+        let sbt_minted_event = SBTMintedEvent {
+            sbt_id,
+            owner: user_addr,
+            oath_id,
+            mint_time: timestamp::now_seconds(),
+        };
+        event::emit(sbt_minted_event);
     }
 
     // ========== Vault 相关函数 ==========
@@ -470,5 +636,136 @@ module OathDefi::oath_vault_v7 {
         
         let sbt_table = borrow_global<SBTTable>(owner);
         sbt_table.next_id - 1
+    }
+
+    /// 获取全局 Oath 记录总数
+    #[view]
+    public fun get_global_oath_count(): u64 acquires GlobalOathRegistry {
+        if (!exists<GlobalOathRegistry>(@OathDefi)) {
+            return 0
+        };
+        
+        let registry = borrow_global<GlobalOathRegistry>(@OathDefi);
+        registry.next_global_id - 1
+    }
+
+    /// 获取全局 Oath 记录列表（分页）
+    #[view] 
+    public fun get_global_oath_records(
+        start_id: u64,
+        limit: u64
+    ): vector<OathRecord> acquires GlobalOathRegistry {
+        let records = vector::empty<OathRecord>();
+        
+        if (!exists<GlobalOathRegistry>(@OathDefi)) {
+            return records
+        };
+        
+        let registry = borrow_global<GlobalOathRegistry>(@OathDefi);
+        let max_id = registry.next_global_id - 1;
+        let end_id = if (start_id + limit > max_id) { max_id } else { start_id + limit };
+        
+        let current_id = start_id;
+        while (current_id <= end_id && vector::length(&records) < limit) {
+            if (table::contains(&registry.oath_records, current_id)) {
+                let record = *table::borrow(&registry.oath_records, current_id);
+                vector::push_back(&mut records, record);
+            };
+            current_id = current_id + 1;
+        };
+        
+        records
+    }
+
+    /// 根据全局记录获取具体的 Oath 数据
+    #[view]
+    public fun get_oath_by_global_id(global_id: u64): Option<Oath> acquires GlobalOathRegistry, OathTable {
+        if (!exists<GlobalOathRegistry>(@OathDefi)) {
+            return option::none<Oath>()
+        };
+        
+        let registry = borrow_global<GlobalOathRegistry>(@OathDefi);
+        if (!table::contains(&registry.oath_records, global_id)) {
+            return option::none<Oath>()
+        };
+        
+        let record = table::borrow(&registry.oath_records, global_id);
+        get_oath(record.owner, record.local_id)
+    }
+
+    /// 获取用户的 Vault 列表（指定范围）
+    #[view]
+    public fun get_vault_list(owner: address, start_id: u64, limit: u64): vector<Vault> acquires VaultTable {
+        let result = vector::empty<Vault>();
+        
+        if (!exists<VaultTable>(owner)) {
+            return result
+        };
+        
+        let vault_table = borrow_global<VaultTable>(owner);
+        let max_id = vault_table.next_id - 1;
+        let end_id = if (start_id + limit > max_id) { max_id } else { start_id + limit - 1 };
+        
+        let i = start_id;
+        while (i <= end_id && i > 0) {
+            if (table::contains(&vault_table.vaults, i)) {
+                let vault = *table::borrow(&vault_table.vaults, i);
+                vector::push_back(&mut result, vault);
+            };
+            i = i + 1;
+        };
+        
+        result
+    }
+
+    /// 获取用户的所有 Vault 列表
+    #[view]
+    public fun get_all_vaults(owner: address): vector<Vault> acquires VaultTable {
+        if (!exists<VaultTable>(owner)) {
+            return vector::empty<Vault>()
+        };
+        
+        let vault_table = borrow_global<VaultTable>(owner);
+        let max_id = vault_table.next_id - 1;
+        
+        get_vault_list(owner, 1, max_id)
+    }
+
+    /// 获取用户的 Oath 列表（指定范围）
+    #[view]
+    public fun get_oath_list(owner: address, start_id: u64, limit: u64): vector<Oath> acquires OathTable {
+        let result = vector::empty<Oath>();
+        
+        if (!exists<OathTable>(owner)) {
+            return result
+        };
+        
+        let oath_table = borrow_global<OathTable>(owner);
+        let max_id = oath_table.next_id - 1;
+        let end_id = if (start_id + limit > max_id) { max_id } else { start_id + limit - 1 };
+        
+        let i = start_id;
+        while (i <= end_id && i > 0) {
+            if (table::contains(&oath_table.oaths, i)) {
+                let oath = *table::borrow(&oath_table.oaths, i);
+                vector::push_back(&mut result, oath);
+            };
+            i = i + 1;
+        };
+        
+        result
+    }
+
+    /// 获取用户的所有 Oath 列表
+    #[view]
+    public fun get_all_oaths(owner: address): vector<Oath> acquires OathTable {
+        if (!exists<OathTable>(owner)) {
+            return vector::empty<Oath>()
+        };
+        
+        let oath_table = borrow_global<OathTable>(owner);
+        let max_id = oath_table.next_id - 1;
+        
+        get_oath_list(owner, 1, max_id)
     }
 }
