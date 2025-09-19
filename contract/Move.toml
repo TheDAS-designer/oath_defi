@@ -1,6 +1,6 @@
 [package]
-name = "oath_vault_v3"
-version = "2.0.1"
+name = "oath_vault_v7"
+version = "2.0.7"
 authors = []
 
 [addresses]
