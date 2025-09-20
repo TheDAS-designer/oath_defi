@@ -124,17 +124,61 @@ export default function CreateVaultPage() {
   };
 
   const handleSubmit = async () => {
+    if (!wallet) {
+      setSubmitError('Please connect your wallet first');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 构建 Vault 创建参数
+      const vaultParams = {
+        name: form.name,
+        symbol: form.symbol,
+        description: form.description,
+        strategy_id: form.strategyId,
+        timelock: form.timelock,
+        fee_rate: Math.floor(form.feeRate * 100), // 转换为基点
+        performance_fee: Math.floor(form.performanceFee * 100),
+        markets: form.selectedMarkets.map(m => m.address),
+        allocations: Object.values(form.allocations)
+      };
+
+      console.log('Creating vault with params:', vaultParams);
+
+      // 模拟 Vault 创建过程（等待真实的 Vault 合约实现）
+      // 在真实环境中，这里会调用专门的 Vault 创建 hook
       
-      // For demo purposes, navigate to a vault details page
-      router.push('/vaults/0xnewvault123');
+      // 模拟交易延迟
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // 模拟成功的交易结果
+      const mockTxHash = '0x' + Math.random().toString(16).substr(2, 64);
+      const mockVaultAddress = '0x' + Math.random().toString(16).substr(2, 40);
+      
+      console.log('Vault created successfully with address:', mockVaultAddress);
+      console.log('Transaction hash:', mockTxHash);
+
+      // 导航到新创建的 vault 详情页
+      router.push(`/vaults/${mockVaultAddress}`);
     } catch (error) {
-      setSubmitError('Failed to deploy vault. Please try again.');
+      console.error('Failed to create vault:', error);
+      
+      let errorMessage = 'Failed to deploy vault. Please try again.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient funds to pay for transaction fees.';
+        } else if (error.message.includes('user rejected')) {
+          errorMessage = 'Transaction was rejected by user.';
+        } else if (error.message.includes('No Aptos wallet detected')) {
+          errorMessage = error.message;
+        }
+      }
+      
+      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }

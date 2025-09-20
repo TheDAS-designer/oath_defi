@@ -4,13 +4,17 @@ import Link from 'next/link';
 import { ArrowRight, Shield, TrendingUp, Users, DollarSign, CheckCircle, AlertTriangle } from 'lucide-react';
 import StatsCard from '@/components/StatsCard';
 import OathCard from '@/components/OathCard';
-import { mockOaths, protocolStats } from '@/lib/mockData';
+import { useOathData } from '@/hooks/useOathData';
+import { protocolStats } from '@/lib/mockData';
 import { formatCurrency } from '@/utils/format';
+import { OathStatus } from '@/types/oath';
 
 export default function HomePage() {
+  const { oaths, hasRealData } = useOathData();
+  
   // Get featured oaths (active ones with high collateral)
-  const featuredOaths = mockOaths
-    .filter(oath => oath.status === 'Active')
+  const featuredOaths = oaths
+    .filter(oath => oath.status === OathStatus.Active)
     .sort((a, b) => {
       const aCollateral = a.collateralTokens.reduce((sum, token) => sum + token.usdValue, 0);
       const bCollateral = b.collateralTokens.reduce((sum, token) => sum + token.usdValue, 0);
@@ -136,6 +140,13 @@ export default function HomePage() {
               <OathCard key={oath.id} oath={oath} />
             ))}
           </div>
+          {hasRealData && (
+            <div className="mt-6 text-center">
+              <p className="text-sm text-green-600">
+                ✓ Showing live on-chain oath data
+              </p>
+            </div>
+          )}
         </div>
       </section>
 

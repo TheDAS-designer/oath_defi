@@ -7,7 +7,10 @@ import Link from 'next/link';
 import { useWallet } from '@/hooks/useWallet';
 import { mockOathTemplates, mockMetaMorphoVaults } from '@/lib/mockData';
 import { OathTemplate, CollateralToken } from '@/types/oath';
-import { formatCurrency, formatPercentage } from '@/utils/format';
+import { formatCurrency, formatPercentage, formatTransactionHash, getAptosExplorerUrl } from '@/utils/format';
+import { useAptos } from '@/hooks/useAptos';
+import { OATH_CONTRACT_CONFIG } from '@/types/aptos';
+
 
 interface CreateOathForm {
   templateId: string;
@@ -17,6 +20,9 @@ interface CreateOathForm {
   totalCollateralValue: number;
   duration: number;
   evidence: string;
+  // 新增字段
+  name: string;
+  description: string;
 }
 
 enum CreateStep {
@@ -27,12 +33,20 @@ enum CreateStep {
   REVIEW_CONFIRM = 4
 }
 
+// Token地址映射（模拟真实的token地址）
+const TOKEN_ADDRESSES = {
+  'USDC': '0x1::coin::CoinStore<0x69091fbab5f7d635ee7ac5098cf0c1efbe31d68fec0f2cd565e8d168daf52832::asset::USDC>',
+  'APT': '0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>',
+  'USDT': '0x1::coin::CoinStore<0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDT>'
+};
+
 export default function CreateOathPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const vaultParam = searchParams?.get('vault');
+  const { createOath } = useAptos();
   
-  const { wallet, isConnected, connectWallet } = useWallet();
+  const { wallet, isConnected, connectWallet, signAndSubmitTransaction } = useWallet();
   
   const [currentStep, setCurrentStep] = useState<CreateStep>(
     isConnected ? CreateStep.SELECT_TEMPLATE : CreateStep.CONNECT_WALLET
@@ -45,11 +59,17 @@ export default function CreateOathPage() {
     collateralTokens: [],
     totalCollateralValue: 0,
     duration: 30,
-    evidence: ''
+    evidence: '',
+    name: '',
+    description: ''
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successState, setSuccessState] = useState<{
+    transactionHash: string;
+    oathId: string;
+  } | null>(null);
 
   const selectedTemplate = mockOathTemplates.find(t => t.id === form.templateId);
   const selectedVault = mockMetaMorphoVaults.find(v => v.address === form.vaultAddress);
@@ -68,6 +88,42 @@ export default function CreateOathPage() {
     }
   }, [vaultParam, selectedTemplate?.id]);
 
+  // Auto-populate name and description when template changes
+  useEffect(() => {
+    if (selectedTemplate && form.templateId === selectedTemplate.id) {
+      // 只在name和description为空时自动填充，避免覆盖用户输入
+      if (!form.name) {
+        let defaultName = selectedTemplate.name;
+        
+        // 根据模板类型和选择的vault生成更智能的默认名称
+        if (selectedTemplate.id === 'apy-guarantee' && selectedVault) {
+          defaultName = `APY Guarantee for ${selectedVault.name}`;
+        } else if (selectedTemplate.id === 'token-lock') {
+          defaultName = `Token Lock Commitment`;
+        } else if (selectedTemplate.id === 'performance-target') {
+          defaultName = `Performance Target Commitment`;
+        }
+        
+        setForm(prev => ({ ...prev, name: defaultName }));
+      }
+      
+      if (!form.description) {
+        let defaultDescription = selectedTemplate.description;
+        
+        // 根据模板类型生成更详细的默认描述
+        if (selectedTemplate.id === 'apy-guarantee') {
+          defaultDescription = `I commit to maintaining the specified APY performance for the selected vault. This commitment includes regular monitoring and strategic adjustments to ensure target performance is met.`;
+        } else if (selectedTemplate.id === 'token-lock') {
+          defaultDescription = `I commit to locking the specified tokens for the agreed duration to demonstrate long-term commitment to the project and build trust with the community.`;
+        } else if (selectedTemplate.id === 'performance-target') {
+          defaultDescription = `I commit to achieving the specified performance targets within the given timeframe, with clear metrics and measurement criteria.`;
+        }
+        
+        setForm(prev => ({ ...prev, description: defaultDescription }));
+      }
+    }
+  }, [selectedTemplate, form.templateId, selectedVault, form.name, form.description]);
+
   const updateForm = (updates: Partial<CreateOathForm>) => {
     setForm(prev => ({ ...prev, ...updates }));
   };
@@ -83,7 +139,7 @@ export default function CreateOathPage() {
     const newToken: CollateralToken = {
       symbol: 'USDC',
       amount: 1000,
-      address: '0xusdc',
+      address: TOKEN_ADDRESSES['USDC'],
       usdValue: 1000
     };
     
@@ -130,6 +186,11 @@ export default function CreateOathPage() {
         return form.templateId !== '';
       case CreateStep.CONFIGURE_PARAMS:
         if (!selectedTemplate) return false;
+        
+        // 验证name和description
+        if (!form.name.trim() || !form.description.trim()) return false;
+        
+        // 验证模板参数
         return selectedTemplate.parameters.every(param => {
           if (!param.required) return true;
           const value = form.parameters[param.key];
@@ -147,8 +208,15 @@ export default function CreateOathPage() {
           return value !== undefined && value !== '' && value !== 0;
         });
       case CreateStep.SET_COLLATERAL:
-        return form.collateralTokens.length > 0 && 
-               form.totalCollateralValue >= (selectedTemplate?.minimumCollateral || 0);
+        // 更严格的collateral验证
+        const hasValidTokens = form.collateralTokens.length > 0 && 
+                              form.collateralTokens.every(token => 
+                                token.amount > 0 && 
+                                token.address && 
+                                token.symbol
+                              );
+        const meetsMinimum = form.totalCollateralValue >= (selectedTemplate?.minimumCollateral || 0);
+        return hasValidTokens && meetsMinimum;
       default:
         return true;
     }
@@ -167,20 +235,168 @@ export default function CreateOathPage() {
   };
 
   const handleSubmit = async () => {
+    if (!wallet) {
+      setSubmitError('Please connect your wallet first');
+      return;
+    }
+
+    if (!selectedTemplate) {
+      setSubmitError('Please select an oath template');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // 构建oath内容 - 使用用户输入的name作为主要内容
+      let oathContent = form.name.trim();
+      let description = form.description.trim();
       
-      // For demo purposes, just navigate to the oath details
-      // In real implementation, you would call the smart contract here
-      router.push('/oaths/1');
+      // 根据模板参数构建具体内容补充信息
+      selectedTemplate.parameters.forEach(param => {
+        let value = form.parameters[param.key];
+        
+        if (param.key === 'vaultAddress') {
+          value = value || form.vaultAddress;
+          if (value && selectedVault) {
+            oathContent += ` for vault ${selectedVault.name} (${value})`;
+          }
+        } else if (param.key === 'duration') {
+          value = value || form.duration;
+          oathContent += ` for ${value} days`;
+        } else if (param.key === 'targetAPY') {
+          oathContent += ` with target APY of ${value}%`;
+        } else if (param.key === 'tokenSymbol') {
+          oathContent += ` for ${value} tokens`;
+        } else if (param.key === 'lockAmount') {
+          oathContent += ` locking ${value} tokens`;
+        }
+      });
+
+      // 计算结束时间 (当前时间 + duration天)
+      const endTime = Math.floor(Date.now() / 1000) + (form.duration * 24 * 60 * 60);
+      
+      // 构建collateral tokens数据
+      const collateralTokens = form.collateralTokens.map(token => ({
+        token_address: token.address,
+        address: token.address,
+        amount: token.amount,
+        symbol: token.symbol,
+        usdValue: token.usdValue
+      }));
+
+      // 构建合约参数
+      const createOathArgs = {
+        content: oathContent,
+        description: description,
+        category: selectedTemplate.category,
+        collateralAmount: form.totalCollateralValue,
+        endTime: endTime,
+        vaultAddress: form.vaultAddress,
+        targetAPY: typeof form.parameters.targetAPY === 'number' ? form.parameters.targetAPY : undefined,
+        collateralTokens: collateralTokens,
+        categoryId: selectedTemplate.id,
+      };
+
+      console.log('Creating oath with args:', createOathArgs);
+      console.log('Wallet:', wallet);
+
+      // 使用钱包适配器提交交易
+      console.log('Preparing transaction with wallet adapter...');
+      
+      const payload = {
+        type: "entry_function_payload",
+        function: `${OATH_CONTRACT_CONFIG.contractAddress}::${OATH_CONTRACT_CONFIG.moduleName}::${OATH_CONTRACT_CONFIG.functionName}`,
+        arguments: [
+          createOathArgs.content,
+          createOathArgs.description,
+          createOathArgs.category,
+          createOathArgs.collateralAmount,
+          createOathArgs.endTime,
+          createOathArgs.vaultAddress,
+          createOathArgs.targetAPY || 0,
+          createOathArgs.categoryId,
+          createOathArgs.collateralTokens.map(t => t.symbol),
+          createOathArgs.collateralTokens.map(t => t.amount),
+          createOathArgs.collateralTokens.map(t => t.address),
+          createOathArgs.collateralTokens.map(t => t.usdValue),
+        ],
+        type_arguments: []
+      };
+
+      console.log('Submitting transaction with payload:', payload);
+      
+      // 通过钱包签名并提交交易
+      const result = await signAndSubmitTransaction(payload);
+      console.log('Transaction result:', result);
+      
+      console.log('Oath created successfully:', result);
+
+      // 在真实环境中，你可能需要从交易结果中解析oath ID
+      const mockOathId = Math.floor(Math.random() * 1000) + 1;
+      
+      // 设置成功状态而不是立即跳转
+      setSuccessState({
+        transactionHash: result.hash,
+        oathId: mockOathId.toString()
+      });
+      
     } catch (error) {
-      setSubmitError('Failed to create oath. Please try again.');
+      console.error('Failed to create oath:', error);
+      
+      let errorMessage = 'Failed to create oath. Please try again.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient funds to pay for transaction fees.';
+        } else if (error.message.includes('user rejected')) {
+          errorMessage = 'Transaction was rejected by user.';
+        } else if (error.message.includes('network')) {
+          errorMessage = 'Network error. Please check your connection and try again.';
+        } else if (error.message.includes('INSUFFICIENT_BALANCE')) {
+          errorMessage = 'Insufficient token balance for collateral staking.';
+        } else if (error.message.includes('INVALID_COLLATERAL')) {
+          errorMessage = 'Invalid collateral configuration. Please check your token amounts.';
+        } else {
+          errorMessage = `Error: ${error.message}`;
+        }
+      }
+      
+      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const regenerateDefaults = () => {
+    if (selectedTemplate) {
+      let defaultName = selectedTemplate.name;
+      let defaultDescription = selectedTemplate.description;
+      
+      // 根据模板类型和选择的vault生成更智能的默认名称
+      if (selectedTemplate.id === 'apy-guarantee' && selectedVault) {
+        defaultName = `APY Guarantee for ${selectedVault.name}`;
+      } else if (selectedTemplate.id === 'token-lock') {
+        defaultName = `Token Lock Commitment`;
+      } else if (selectedTemplate.id === 'performance-target') {
+        defaultName = `Performance Target Commitment`;
+      }
+      
+      // 根据模板类型生成更详细的默认描述
+      if (selectedTemplate.id === 'apy-guarantee') {
+        defaultDescription = `I commit to maintaining the specified APY performance for the selected vault. This commitment includes regular monitoring and strategic adjustments to ensure target performance is met.`;
+      } else if (selectedTemplate.id === 'token-lock') {
+        defaultDescription = `I commit to locking the specified tokens for the agreed duration to demonstrate long-term commitment to the project and build trust with the community.`;
+      } else if (selectedTemplate.id === 'performance-target') {
+        defaultDescription = `I commit to achieving the specified performance targets within the given timeframe, with clear metrics and measurement criteria.`;
+      }
+      
+      setForm(prev => ({
+        ...prev,
+        name: defaultName,
+        description: defaultDescription
+      }));
     }
   };
 
@@ -333,6 +549,66 @@ export default function CreateOathPage() {
               
               <div className="space-y-6">
                 
+                {/* Oath Name and Description */}
+                <div className="space-y-4 pb-6 border-b border-gray-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Oath Details</h3>
+                    <button
+                      type="button"
+                      onClick={regenerateDefaults}
+                      className="text-sm text-primary-600 hover:text-primary-700 underline"
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Oath Name <span className="text-red-500 ml-1">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={(e) => updateForm({ name: e.target.value })}
+                      placeholder="Enter a descriptive name for your oath"
+                      className="input"
+                      maxLength={100}
+                      required
+                    />
+                    <div className="flex justify-between items-center mt-1">
+                      <p className="text-xs text-gray-500">
+                        This will be the public display name for your oath
+                      </p>
+                      <span className={`text-xs ${form.name.length > 80 ? 'text-yellow-600' : 'text-gray-400'}`}>
+                        {form.name.length}/100
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Description <span className="text-red-500 ml-1">*</span>
+                    </label>
+                    <textarea
+                      value={form.description}
+                      onChange={(e) => updateForm({ description: e.target.value })}
+                      placeholder="Provide detailed information about your commitment"
+                      className="input min-h-[100px] resize-y"
+                      rows={4}
+                      maxLength={500}
+                      required
+                    />
+                    <div className="flex justify-between items-center mt-1">
+                      <p className="text-xs text-gray-500">
+                        Explain your commitment and how it will be measured
+                      </p>
+                      <span className={`text-xs ${form.description.length > 400 ? 'text-yellow-600' : 'text-gray-400'}`}>
+                        {form.description.length}/500
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Dynamic form fields based on template parameters */}
                 {selectedTemplate.parameters.map((param) => {
                   // Handle special cases for different parameter types
@@ -454,7 +730,7 @@ export default function CreateOathPage() {
                         value={token.symbol}
                         onChange={(e) => updateCollateralToken(index, { 
                           symbol: e.target.value,
-                          address: `0x${e.target.value.toLowerCase()}`
+                          address: TOKEN_ADDRESSES[e.target.value as keyof typeof TOKEN_ADDRESSES] || `0x${e.target.value.toLowerCase()}`
                         })}
                         className="input"
                       >
@@ -517,102 +793,211 @@ export default function CreateOathPage() {
           {/* Step 4: Review & Confirm */}
           {currentStep === CreateStep.REVIEW_CONFIRM && selectedTemplate && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                Review Your Oath
-              </h2>
-              
-              <div className="bg-gray-50 rounded-lg p-6 mb-6">
-                <h3 className="font-semibold text-gray-900 mb-4">Oath Summary</h3>
-                
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Template:</span>
-                    <span className="font-medium">{selectedTemplate.name}</span>
-                  </div>
+              {!successState ? (
+                <>
+                  <h2 className="text-xl font-semibold text-gray-900 mb-6">
+                    Review Your Oath
+                  </h2>
                   
-                  {selectedTemplate.parameters.map((param) => {
-                    let value = form.parameters[param.key];
+                  <div className="bg-gray-50 rounded-lg p-6 mb-6">
+                    <h3 className="font-semibold text-gray-900 mb-4">Oath Summary</h3>
                     
-                    // Handle special cases
-                    if (param.key === 'vaultAddress') {
-                      value = value || form.vaultAddress;
-                    } else if (param.key === 'duration') {
-                      value = value || form.duration;
-                    }
-                    
-                    if (!value && !param.required) return null;
-                    
-                    return (
-                      <div key={param.key} className="flex justify-between">
-                        <span className="text-gray-600">{param.label}:</span>
-                        <span className="font-medium">
-                          {param.type === 'number' && param.key.includes('APY') 
-                            ? formatPercentage(value as number)
-                            : param.key === 'vaultAddress' && selectedVault
-                            ? selectedVault.name
-                            : value?.toString()
-                          }
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Name:</span>
+                        <span className="font-medium">{form.name}</span>
+                      </div>
+                      
+                      <div className="flex flex-col">
+                        <span className="text-gray-600 mb-1">Description:</span>
+                        <span className="font-medium text-xs bg-white p-2 rounded border">
+                          {form.description}
                         </span>
                       </div>
-                    );
-                  })}
-                  
-                  <div className="flex justify-between border-t pt-3">
-                    <span className="text-gray-600">Total Collateral:</span>
-                    <span className="font-bold text-lg">{formatCurrency(form.totalCollateralValue)}</span>
+                      
+                      <div className="flex justify-between border-t pt-3">
+                        <span className="text-gray-600">Template:</span>
+                        <span className="font-medium">{selectedTemplate.name}</span>
+                      </div>
+                      
+                      {selectedTemplate.parameters.map((param) => {
+                        let value = form.parameters[param.key];
+                        
+                        // Handle special cases
+                        if (param.key === 'vaultAddress') {
+                          value = value || form.vaultAddress;
+                        } else if (param.key === 'duration') {
+                          value = value || form.duration;
+                        }
+                        
+                        if (!value && !param.required) return null;
+                        
+                        return (
+                          <div key={param.key} className="flex justify-between">
+                            <span className="text-gray-600">{param.label}:</span>
+                            <span className="font-medium">
+                              {param.type === 'number' && param.key.includes('APY') 
+                                ? formatPercentage(value as number)
+                                : param.key === 'vaultAddress' && selectedVault
+                                ? selectedVault.name
+                                : value?.toString()
+                              }
+                            </span>
+                          </div>
+                        );
+                      })}
+                      
+                      <div className="flex justify-between border-t pt-3">
+                        <span className="text-gray-600">Total Collateral:</span>
+                        <span className="font-bold text-lg">{formatCurrency(form.totalCollateralValue)}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                <h4 className="font-medium text-red-800 mb-2">Final Confirmation</h4>
-                <p className="text-sm text-red-700">
-                  By creating this oath, I understand that if I fail to meet the specified commitments, 
-                  my collateral will be slashed and distributed to affected users. This action cannot be undone.
-                </p>
-              </div>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                    <h4 className="font-medium text-red-800 mb-2">Final Confirmation</h4>
+                    <p className="text-sm text-red-700">
+                      By creating this oath, I understand that if I fail to meet the specified commitments, 
+                      my collateral will be slashed and distributed to affected users. This action cannot be undone.
+                    </p>
+                  </div>
 
-              {submitError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                  <p className="text-red-800">{submitError}</p>
+                  {submitError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                      <p className="text-red-800">{submitError}</p>
+                    </div>
+                  )}
+
+                  {/* Transaction Status */}
+                  {isSubmitting && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                        <div>
+                          <h4 className="font-medium text-blue-800">Creating Oath...</h4>
+                          <p className="text-sm text-blue-700">
+                            Please confirm the transaction in your wallet and wait for blockchain confirmation.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Ready State */}
+                  {!isSubmitting && !submitError && wallet && (
+                    <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                      <h4 className="font-medium text-gray-800 mb-2">Ready to Create</h4>
+                      <p className="text-sm text-gray-600">
+                        Connected as: <span className="font-mono">{wallet.address.slice(0, 8)}...{wallet.address.slice(-8)}</span>
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Balance: {wallet.balance.toFixed(4)} APT
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="bg-success-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle className="h-8 w-8 text-success-600" />
+                  </div>
+                  
+                  <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                    Oath Created Successfully!
+                  </h2>
+                  
+                  <div className="bg-gray-50 rounded-lg p-6 mb-6 max-w-md mx-auto">
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Oath ID:</span>
+                        <span className="font-mono font-medium">#{successState.oathId}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Transaction:</span>
+                        <a 
+                          href={getAptosExplorerUrl(successState.transactionHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-primary-600 hover:text-primary-700 underline"
+                        >
+                          {formatTransactionHash(successState.transactionHash)}
+                        </a>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Network:</span>
+                        <span className="font-medium">Aptos Testnet</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                    <button
+                      onClick={() => router.push(`/oaths/${successState.oathId}`)}
+                      className="btn-primary"
+                    >
+                      View Oath Details
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSuccessState(null);
+                        setCurrentStep(CreateStep.SELECT_TEMPLATE);
+                        setForm({
+                          templateId: '',
+                          vaultAddress: '',
+                          parameters: {},
+                          collateralTokens: [],
+                          totalCollateralValue: 0,
+                          duration: 30,
+                          evidence: '',
+                          name: '',
+                          description: ''
+                        });
+                      }}
+                      className="btn-secondary"
+                    >
+                      Create Another Oath
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {/* Navigation */}
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-200">
-            {currentStep > (isConnected ? CreateStep.SELECT_TEMPLATE : CreateStep.CONNECT_WALLET) ? (
-              <button
-                onClick={handleBack}
-                className="btn-secondary flex items-center space-x-2"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back</span>
-              </button>
-            ) : (
-              <div />
-            )}
+          {!successState && (
+            <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-200">
+              {currentStep > (isConnected ? CreateStep.SELECT_TEMPLATE : CreateStep.CONNECT_WALLET) ? (
+                <button
+                  onClick={handleBack}
+                  className="btn-secondary flex items-center space-x-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back</span>
+                </button>
+              ) : (
+                <div />
+              )}
 
-            {currentStep < CreateStep.REVIEW_CONFIRM ? (
-              <button
-                onClick={handleNext}
-                disabled={!canProceedToNext()}
-                className="btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span>Next</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting || !canProceedToNext()}
-                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? 'Creating Oath...' : 'Create Oath'}
-              </button>
-            )}
-          </div>
+              {currentStep < CreateStep.REVIEW_CONFIRM ? (
+                <button
+                  onClick={handleNext}
+                  disabled={!canProceedToNext()}
+                  className="btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span>Next</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !canProceedToNext()}
+                  className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting ? 'Creating Oath...' : 'Create Oath'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

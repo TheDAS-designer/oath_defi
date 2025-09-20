@@ -35,8 +35,8 @@ export default function VaultDetailPage() {
   }
 
   const isVaultOwner = wallet?.address === vault.creator;
-  const userShares = 50000; // Mock user shares
-  const userValue = userShares * vault.metrics.sharePrice;
+  const userInvestment = 50000; // Mock user investment in USDC
+  const userShare = vault.metrics.totalValueLocked > 0 ? (userInvestment / vault.metrics.totalValueLocked) * 100 : 0;
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: TrendingUp },
@@ -80,9 +80,9 @@ export default function VaultDetailPage() {
             </div>
             
             <div>
-              <div className="text-sm text-gray-500">Share Price</div>
+              <div className="text-sm text-gray-500">Net APY</div>
               <div className="text-2xl font-bold text-gray-900">
-                ${vault.metrics.sharePrice.toFixed(4)}
+                {formatPercentage(vault.metrics.netAPY)}
               </div>
             </div>
             
@@ -104,7 +104,7 @@ export default function VaultDetailPage() {
               <span>Deposit</span>
             </button>
             
-            {userShares > 0 && (
+            {userInvestment > 0 && (
               <button className="btn-secondary flex items-center space-x-2">
                 <Minus className="h-4 w-4" />
                 <span>Withdraw</span>
@@ -133,22 +133,18 @@ export default function VaultDetailPage() {
           </div>
 
           {/* User Position */}
-          {userShares > 0 && (
+          {userInvestment > 0 && (
             <div className="mt-6 p-4 bg-primary-50 rounded-lg">
               <h3 className="font-medium text-primary-900 mb-2">Your Position</h3>
-              <div className="grid grid-cols-3 gap-4 text-sm">
+              <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-primary-700">Shares:</span>
-                  <div className="font-medium text-primary-900">{userShares.toLocaleString()}</div>
+                  <span className="text-primary-700">Investment:</span>
+                  <div className="font-medium text-primary-900">{formatCurrency(userInvestment)}</div>
                 </div>
                 <div>
-                  <span className="text-primary-700">Value:</span>
-                  <div className="font-medium text-primary-900">{formatCurrency(userValue)}</div>
-                </div>
-                <div>
-                  <span className="text-primary-700">Share %:</span>
+                  <span className="text-primary-700">Pool Share:</span>
                   <div className="font-medium text-primary-900">
-                    {((userShares / vault.metrics.totalShares) * 100).toFixed(2)}%
+                    {userShare.toFixed(2)}%
                   </div>
                 </div>
               </div>
@@ -454,8 +450,8 @@ export default function VaultDetailPage() {
               </div>
               
               <div className="text-sm text-gray-600">
-                <p>Share Price: ${vault.metrics.sharePrice.toFixed(4)}</p>
-                <p>Estimated Shares: {depositAmount ? (parseFloat(depositAmount) / vault.metrics.sharePrice).toFixed(2) : '0.00'}</p>
+                <p>Current Pool Size: {formatCurrency(vault.metrics.totalValueLocked)}</p>
+                <p>Your Share: {depositAmount ? ((parseFloat(depositAmount) / (vault.metrics.totalValueLocked + parseFloat(depositAmount))) * 100).toFixed(2) : '0.00'}%</p>
               </div>
             </div>
             

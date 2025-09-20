@@ -154,8 +154,6 @@ export const mockDetailedVaults: DetailedVault[] = [
     
     metrics: {
       totalValueLocked: 2500000,
-      totalShares: 2400000,
-      sharePrice: 1.0417,
       apy: 13.5,
       utilization: 82.5,
       totalSupplied: 2500000,
@@ -259,8 +257,6 @@ export const mockDetailedVaults: DetailedVault[] = [
     
     metrics: {
       totalValueLocked: 5200000,
-      totalShares: 4800000,
-      sharePrice: 1.0833,
       apy: 18.2,
       utilization: 88.5,
       totalSupplied: 5200000,

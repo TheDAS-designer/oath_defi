@@ -71,8 +71,6 @@ export interface CreateVaultForm {
 
 export interface VaultMetrics {
   totalValueLocked: number;
-  totalShares: number;
-  sharePrice: number;
   apy: number;
   utilization: number;
   totalSupplied: number;

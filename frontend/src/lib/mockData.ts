@@ -17,8 +17,8 @@ export const mockOaths: Oath[] = [
     currentAPY: 13.5,
     vaultAddress: '0xvault1234567890abcdef',
     collateralTokens: [
-      { symbol: 'USDC', amount: 80000, address: '0xusdc', usdValue: 80000 },
-      { symbol: 'APT', amount: 2500, address: '0xapt', usdValue: 20000 }
+      { symbol: 'USDC', amount: 80000, address: '0x69091fbab5f7d635ee7ac5098cf0c1efbe31d68fec0f2cd565e8d168daf52832', usdValue: 80000 },
+      { symbol: 'APT', amount: 2500, address: '0x1::aptos_coin::AptosCoin', usdValue: 20000 }
     ]
   },
   {

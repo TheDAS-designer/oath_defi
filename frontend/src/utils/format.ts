@@ -61,8 +61,9 @@ export const formatAddress = (address: string, length: number = 4): string => {
   return `${address.slice(0, length + 2)}...${address.slice(-length)}`;
 };
 
-export const getStatusColor = (status: string): string => {
-  switch (status.toLowerCase()) {
+export const getStatusColor = (status: string | number | any): string => {
+  const statusStr = typeof status === 'string' ? status : String(status || '');
+  switch (statusStr.toLowerCase()) {
     case 'active':
       return 'text-primary-600 bg-primary-50';
     case 'completed':
@@ -88,4 +89,25 @@ export const calculateProgress = (startTime: number, endTime: number, currentTim
   if (elapsed >= total) return 100;
   
   return Math.floor((elapsed / total) * 100);
+}; 
+
+export const formatTransactionHash = (hash: string): string => {
+  if (!hash) return '';
+  return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
+};
+
+export const getAptosExplorerUrl = (hash: string, network: 'testnet' | 'mainnet' = 'testnet'): string => {
+  const baseUrl = network === 'mainnet' 
+    ? 'https://explorer.aptoslabs.com'
+    : 'https://explorer.aptoslabs.com/?network=testnet';
+  
+  return `${baseUrl}/txn/${hash}`;
+};
+
+export const getAptosAccountUrl = (address: string, network: 'testnet' | 'mainnet' = 'testnet'): string => {
+  const baseUrl = network === 'mainnet' 
+    ? 'https://explorer.aptoslabs.com'
+    : 'https://explorer.aptoslabs.com/?network=testnet';
+  
+  return `${baseUrl}/account/${address}`;
 }; 

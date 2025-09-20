@@ -3,7 +3,8 @@
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ExternalLink, Shield, Clock, Users, AlertTriangle, CheckCircle, XCircle, Copy } from 'lucide-react';
-import { mockOaths, mockMetaMorphoVaults } from '@/lib/mockData';
+import { useOathData } from '@/hooks/useOathData';
+import { mockMetaMorphoVaults } from '@/lib/mockData';
 import { OathStatus } from '@/types/oath';
 import { formatCurrency, formatPercentage, formatDateTime, formatAddress, getStatusColor, calculateProgress } from '@/utils/format';
 import PerformanceChart from '@/components/PerformanceChart';
@@ -13,8 +14,9 @@ export default function OathDetailPage() {
   const params = useParams();
   const oathId = params.id as string;
   const currentTime = useClientTime();
+  const { getOathById, hasRealData } = useOathData();
 
-  const oath = mockOaths.find(o => o.id === oathId);
+  const oath = getOathById(oathId);
   const vault = oath?.vaultAddress ? mockMetaMorphoVaults.find(v => v.address === oath.vaultAddress) : null;
 
   if (!oath) {
@@ -53,6 +55,11 @@ export default function OathDetailPage() {
               <ArrowLeft className="h-6 w-6" />
             </Link>
             <h1 className="text-2xl font-bold text-gray-900">Oath Details</h1>
+            {hasRealData && (oath?.id.startsWith('real_') || oath?.id.startsWith('geomi_')) && (
+              <span className="ml-3 px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-md">
+                Live Data
+              </span>
+            )}
           </div>
 
           <div className="flex items-start justify-between">

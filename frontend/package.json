@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "*",
+    "@aptos-labs/ts-sdk": "^5.0.0",
     "@aptos-labs/wallet-adapter-ant-design": "*",
     "@aptos-labs/wallet-adapter-react": "*",
     "autoprefixer": "^10.4.21",

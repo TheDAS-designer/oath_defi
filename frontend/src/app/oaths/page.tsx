@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import OathCard from '@/components/OathCard';
 import OathFilters from '@/components/OathFilters';
-import { mockOaths } from '@/lib/mockData';
+import { useOathData } from '@/hooks/useOathData';
 import { OathStatus, Oath } from '@/types/oath';
 
 interface FilterOptions {
@@ -28,9 +28,11 @@ export default function OathsPage() {
     maxCollateral: 0
   });
 
+  const { oaths, isLoading, error, refreshOaths, hasRealData } = useOathData();
+
   // Filter and sort oaths based on current filters
   const filteredOaths = useMemo(() => {
-    let filtered = mockOaths.filter((oath) => {
+    let filtered = oaths.filter((oath: Oath) => {
       // Search filter
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase();
@@ -92,7 +94,7 @@ export default function OathsPage() {
     });
 
     return filtered;
-  }, [mockOaths, searchTerm, filters]);
+  }, [oaths, searchTerm, filters]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -107,10 +109,24 @@ export default function OathsPage() {
               <p className="mt-2 text-gray-600 max-w-2xl">
                 Discover and evaluate on-chain commitments from DeFi vault managers. 
                 Filter by collateral value, APY promises, and track record.
+                {hasRealData && <span className="ml-2 text-green-600">• Live data connected</span>}
               </p>
+              {error && (
+                <p className="mt-1 text-red-600 text-sm">
+                  Failed to load real data: {error}
+                </p>
+              )}
             </div>
             
-            <div className="mt-4 md:mt-0 md:ml-4">
+            <div className="mt-4 md:mt-0 md:ml-4 flex space-x-3">
+              <button
+                onClick={refreshOaths}
+                disabled={isLoading}
+                className="btn-secondary disabled:opacity-50 flex items-center space-x-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
               <Link 
                 href="/create" 
                 className="btn-primary flex items-center space-x-2"
@@ -143,7 +159,7 @@ export default function OathsPage() {
       <OathFilters
         filters={filters}
         onFiltersChange={setFilters}
-        totalCount={mockOaths.length}
+        totalCount={oaths.length}
         filteredCount={filteredOaths.length}
       />
 
@@ -194,7 +210,8 @@ export default function OathsPage() {
         {filteredOaths.length > 0 && (
           <div className="mt-12 text-center">
             <p className="text-gray-600 text-sm">
-              Showing {filteredOaths.length} of {mockOaths.length} total oaths
+              Showing {filteredOaths.length} of {oaths.length} total oaths
+              {hasRealData && <span className="ml-2 text-green-600">(includes real on-chain data)</span>}
             </p>
           </div>
         )}
