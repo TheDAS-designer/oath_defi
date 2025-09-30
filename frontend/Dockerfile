@@ -1,7 +1,7 @@
 # 推荐用于 Next.js 前端生产部署的 Dockerfile
 
 # 1. 使用官方 Node 镜像（建议 Node 18 或更高）
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
